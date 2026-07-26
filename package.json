@@ -50,7 +50,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "node -e \"for (const d of ['dist','build-test']) require('node:fs').rmSync(d,{recursive:true,force:true})\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.test.json && node --test \"build-test/test/*.test.js\"",
+    "test": "tsc -p tsconfig.test.json && cd build-test && node --test",
     "demo": "npm run build && node dist/cli.js . --open",
     "prepublishOnly": "npm run clean && npm run build"
   },
