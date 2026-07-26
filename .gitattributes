@@ -1,0 +1,15 @@
+# Normalise line endings so a checkout on Windows does not show every file as
+# modified, and so the end-to-end test sees the same bytes on every platform.
+* text=auto eol=lf
+
+*.svg   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+
+*.png   binary
+*.jpg   binary
+*.woff2 binary
+
+# Keep generated reports and the hero images out of language statistics.
+docs/*.svg linguist-generated=true
