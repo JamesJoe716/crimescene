@@ -1,0 +1,61 @@
+{
+  "name": "crimescene",
+  "version": "0.1.0",
+  "description": "X-ray your codebase from its git history: refactoring hotspots, knowledge risk and hidden coupling. One command, zero dependencies, zero network calls.",
+  "keywords": [
+    "git",
+    "code-quality",
+    "technical-debt",
+    "hotspots",
+    "code-churn",
+    "complexity",
+    "bus-factor",
+    "refactoring",
+    "code-analysis",
+    "visualization",
+    "treemap",
+    "cli",
+    "devtools"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/crimescene.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OWNER/crimescene/issues"
+  },
+  "homepage": "https://github.com/OWNER/crimescene#readme",
+  "type": "module",
+  "bin": {
+    "crimescene": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"for (const d of ['dist','build-test']) require('node:fs').rmSync(d,{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test \"build-test/test/*.test.js\"",
+    "demo": "npm run build && node dist/cli.js . --open",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
