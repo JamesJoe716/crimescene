@@ -33,8 +33,8 @@ the whole time.
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/hotspot-map-dark.svg">
-    <img alt="Hotspot map of the express codebase: a treemap where each rectangle is a file, sized by lines of code and coloured by hotspot score" src="docs/hotspot-map-light.svg" width="820">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JamesJoe716/crimescene/main/docs/hotspot-map-dark.svg">
+    <img alt="Hotspot map of the express codebase: a treemap where each rectangle is a file, sized by lines of code and coloured by hotspot score" src="https://raw.githubusercontent.com/JamesJoe716/crimescene/main/docs/hotspot-map-light.svg" width="820">
   </picture>
   <p><em>The real <a href="https://github.com/expressjs/express">express</a> codebase. Area = lines of code, colour = hotspot score.</em></p>
 </div>
