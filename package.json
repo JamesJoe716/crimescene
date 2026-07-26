@@ -1,6 +1,6 @@
 {
   "name": "crimescene",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "X-ray your codebase from its git history: refactoring hotspots, knowledge risk and hidden coupling. One command, zero dependencies, zero network calls.",
   "keywords": [
     "git",
