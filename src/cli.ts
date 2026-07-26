@@ -6,6 +6,8 @@ import { spawn } from "node:child_process";
 import { VERSION, analyze } from "./analyze.js";
 import { GitError } from "./git.js";
 import { renderReport } from "./report.js";
+import { renderMarkdown } from "./markdown.js";
+import { renderSvg } from "./svg.js";
 import { colorEnabled, createStyler, renderTerminal } from "./terminal.js";
 
 const HELP = `
@@ -16,6 +18,9 @@ const HELP = `
 
   Options
     -o, --out <file>      HTML report path             (default: crimescene.html)
+        --svg <file>      Also write a static hotspot map, for embedding
+        --md <file>       Also write a Markdown summary, for CI and PR comments
+        --svg-theme <t>   light or dark                (default: light)
         --json <file>     Also write the raw analysis as JSON
         --since <when>    Only look at commits after this; anything git accepts
                           e.g. "1 year ago", "2024-01-01", "v2.0.0"
@@ -42,6 +47,9 @@ async function main(argv: string[]): Promise<number> {
     allowPositionals: true,
     options: {
       out: { type: "string", short: "o" },
+      svg: { type: "string" },
+      md: { type: "string" },
+      "svg-theme": { type: "string" },
       json: { type: "string" },
       since: { type: "string" },
       top: { type: "string" },
@@ -75,6 +83,13 @@ async function main(argv: string[]): Promise<number> {
   if (failAbove !== null && !Number.isFinite(failAbove)) {
     throw new UsageError(`--fail-above expects a number, got "${values["fail-above"]}"`);
   }
+  const svgTheme = values["svg-theme"] ?? "light";
+  if (svgTheme !== "light" && svgTheme !== "dark") {
+    throw new UsageError(`--svg-theme expects "light" or "dark", got "${svgTheme}"`);
+  }
+  if (values["svg-theme"] !== undefined && values.svg === undefined) {
+    throw new UsageError("--svg-theme has no effect without --svg");
+  }
 
   const spinner = createSpinner(!quiet && process.stderr.isTTY);
   const report = await analyze({
@@ -94,6 +109,22 @@ async function main(argv: string[]): Promise<number> {
       process.stderr.write(`\n  ${style.green("✓")} ${style.bold("Report")}  ${target}\n`);
     }
     if (values.open) await openInBrowser(target);
+  }
+
+  if (values.svg) {
+    const target = path.resolve(values.svg);
+    await writeFile(target, renderSvg(report, { theme: svgTheme }), "utf8");
+    if (!quiet) {
+      process.stderr.write(`  ${style.green("✓")} ${style.bold("SVG")}     ${target}\n`);
+    }
+  }
+
+  if (values.md) {
+    const target = path.resolve(values.md);
+    await writeFile(target, renderMarkdown(report, { top }), "utf8");
+    if (!quiet) {
+      process.stderr.write(`  ${style.green("✓")} ${style.bold("Markdown")} ${target}\n`);
+    }
   }
 
   if (values.json) {

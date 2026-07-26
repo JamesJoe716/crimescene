@@ -132,6 +132,9 @@ and it is completely invisible to anything that reads only the current source.
 crimescene [path] [options]
 
   -o, --out <file>      HTML report path             (default: crimescene.html)
+      --svg <file>      Also write a static hotspot map, for embedding
+      --svg-theme <t>   light or dark                (default: light)
+      --md <file>       Also write a Markdown summary, for CI and PR comments
       --json <file>     Also write the raw analysis as JSON
       --since <when>    Only look at commits after this; anything git accepts
                         e.g. "1 year ago", "2024-01-01", "v2.0.0"
@@ -156,18 +159,80 @@ npx crimescene ../other-project
 npx crimescene --json report.json --no-html
 ```
 
-### In CI
+### Put the map in your own README
 
-`--fail-above` turns the worst hotspot into a build gate, so complexity that
-people keep paying for cannot quietly get worse:
+`--svg` writes a standalone SVG — no script, no external reference, so GitHub
+renders it untouched. The image at the top of this page is exactly this output,
+regenerated from the real express history:
+
+```bash
+npx crimescene --no-html --svg hotspot-light.svg --svg-theme light
+```
+
+```bash
+npx crimescene --no-html --svg hotspot-dark.svg --svg-theme dark
+```
+
+Then let it follow the reader's theme:
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/hotspot-dark.svg">
+  <img alt="Hotspot map" src="docs/hotspot-light.svg" width="820">
+</picture>
+```
+
+### The GitHub Action
+
+Post the hotspot table on every pull request, publish it to the job summary, and
+attach the full HTML report as an artifact:
+
+```yaml
+name: crimescene
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # crimescene reads history — a shallow clone truncates it
+      - uses: JamesJoe716/crimescene@v1
+        with:
+          since: "2 years ago"
+          fail-above: "80"
+```
+
+Every input is optional. The interesting ones:
+
+| Input | Default | What it does |
+|---|---|---|
+| `since` | *(all history)* | Anything git accepts — `"1 year ago"`, a date, a tag |
+| `fail-above` | *(off)* | Fail the job when the worst hotspot scores above this |
+| `comment` | `true` | Post one sticky PR comment, updated in place on every run |
+| `summary` | `true` | Write the tables to the workflow run's job summary |
+| `artifact` | `true` | Upload the HTML, SVG, Markdown and JSON |
+
+Outputs `top-hotspot-score`, `top-hotspot-path`, `knowledge-concentration` and
+`report-html` are available to later steps.
+
+The gate runs **last**, on purpose: the comment, the summary and the artifact are
+all published before the build goes red. A gate that hides its own evidence is
+useless.
+
+If you would rather wire it up yourself, `--fail-above` is a plain exit code:
 
 ```yaml
 - run: npx crimescene --no-html --fail-above 70
 ```
 
-Or publish the report as an artifact on every run — see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml), which does exactly that
-for this repository.
+This repository runs its own action against itself on every push — see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ### As a library
 
@@ -176,16 +241,21 @@ npm install crimescene
 ```
 
 ```js
-import { analyze, renderReport } from "crimescene";
+import { analyze, renderReport, renderSvg, renderMarkdown } from "crimescene";
 
 const report = await analyze({ cwd: "/path/to/repo", since: "1 year ago" });
 
-console.log(report.files[0].path);              // the worst hotspot
+console.log(report.files[0].path);                 // the worst hotspot
 console.log(report.totals.knowledgeConcentration); // 0-1
-console.log(report.coupling.slice(0, 5));       // strongest coupled pairs
+console.log(report.coupling.slice(0, 5));          // strongest coupled pairs
 
 await fs.writeFile("report.html", renderReport(report));
+await fs.writeFile("map.svg", renderSvg(report, { theme: "dark" }));
+await fs.writeFile("summary.md", renderMarkdown(report, { top: 5 }));
 ```
+
+The treemap layout itself is exported too — `buildTree`, `squarify`, `heatColor` —
+if you want to draw the map yourself.
 
 The `XrayReport` type is fully typed and stable across the `0.x` line for the
 fields documented above.

@@ -1,0 +1,205 @@
+name: crimescene
+description: >-
+  X-ray a codebase from its git history — refactoring hotspots, knowledge risk
+  and change coupling — as a job summary, a PR comment and a downloadable report.
+author: crimescene contributors
+
+branding:
+  icon: crosshair
+  color: orange
+
+inputs:
+  path:
+    description: Repository path to analyse, relative to the workspace.
+    required: false
+    default: "."
+  since:
+    description: >-
+      Only look at commits after this. Anything git accepts, e.g. "1 year ago".
+      Leave empty for the whole history.
+    required: false
+    default: ""
+  top:
+    description: Rows per table in the summary and comment.
+    required: false
+    default: "10"
+  min-commits:
+    description: Ignore files changed fewer than this many times.
+    required: false
+    default: "2"
+  exclude:
+    description: Extra glob to ignore. One per line.
+    required: false
+    default: ""
+  include-all:
+    description: Keep lockfiles, vendored code and non-source files.
+    required: false
+    default: "false"
+  fail-above:
+    description: >-
+      Fail the job when the worst hotspot scores above this (0-100). Empty
+      disables the gate.
+    required: false
+    default: ""
+  comment:
+    description: >-
+      Post the summary as a pull request comment, updating the same comment on
+      every run. Needs `permissions: pull-requests: write`.
+    required: false
+    default: "true"
+  summary:
+    description: Write the summary to the workflow run's job summary.
+    required: false
+    default: "true"
+  artifact:
+    description: Upload the HTML report and JSON as a build artifact.
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the uploaded artifact.
+    required: false
+    default: crimescene-report
+  github-token:
+    description: Token used to post the pull request comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  top-hotspot-score:
+    description: Hotspot score of the worst file, 0-100.
+    value: ${{ steps.run.outputs.top-hotspot-score }}
+  top-hotspot-path:
+    description: Path of the worst file.
+    value: ${{ steps.run.outputs.top-hotspot-path }}
+  knowledge-concentration:
+    description: Share of the risky code held by one person, 0-1.
+    value: ${{ steps.run.outputs.knowledge-concentration }}
+  report-html:
+    description: Path to the generated HTML report.
+    value: ${{ steps.run.outputs.report-html }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check history depth
+      shell: bash
+      run: |
+        # Every analysis here is a history analysis. A shallow clone silently
+        # produces a confident, wrong answer, so say so loudly rather than
+        # reporting hotspots derived from one commit.
+        if [ "$(git -C "$GITHUB_WORKSPACE" rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+          echo "::warning title=Shallow clone::crimescene reads git history, but this checkout is shallow. Add 'fetch-depth: 0' to actions/checkout or the results will be based on a truncated history."
+        fi
+
+    - name: Build crimescene
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        npm ci --no-audit --no-fund --silent
+        npm run build --silent
+
+    - name: Analyse
+      id: run
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_TOP: ${{ inputs.top }}
+        INPUT_MIN_COMMITS: ${{ inputs.min-commits }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_INCLUDE_ALL: ${{ inputs.include-all }}
+      run: |
+        set -euo pipefail
+        out="${RUNNER_TEMP}/crimescene"
+        mkdir -p "$out"
+
+        args=( "$INPUT_PATH" )
+        args+=( --out "${out}/crimescene.html" )
+        args+=( --md  "${out}/crimescene.md" )
+        args+=( --json "${out}/crimescene.json" )
+        args+=( --svg "${out}/crimescene.svg" )
+        args+=( --top "$INPUT_TOP" )
+        args+=( --min-commits "$INPUT_MIN_COMMITS" )
+        if [ -n "$INPUT_SINCE" ]; then args+=( --since "$INPUT_SINCE" ); fi
+        if [ "$INPUT_INCLUDE_ALL" = "true" ]; then args+=( --include-all ); fi
+        while IFS= read -r glob; do
+          if [ -n "$glob" ]; then args+=( --exclude "$glob" ); fi
+        done <<< "$INPUT_EXCLUDE"
+
+        # No --fail-above here on purpose: the gate runs as the last step so the
+        # summary, the comment and the artifact are all published even when the
+        # build is about to go red. A gate that hides its own evidence is useless.
+        NO_COLOR=1 node "${GITHUB_ACTION_PATH}/dist/cli.js" "${args[@]}"
+
+        node -e '
+          const fs = require("node:fs");
+          const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+          const worst = r.files[0] || { hotspot: 0, path: "" };
+          const set = (k, v) => fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`);
+          set("top-hotspot-score", worst.hotspot);
+          set("top-hotspot-path", worst.path);
+          set("knowledge-concentration", r.totals.knowledgeConcentration);
+        ' "${out}/crimescene.json"
+        echo "report-html=${out}/crimescene.html" >> "$GITHUB_OUTPUT"
+        echo "out-dir=${out}" >> "$GITHUB_OUTPUT"
+
+    - name: Job summary
+      if: ${{ always() && inputs.summary == 'true' }}
+      shell: bash
+      run: |
+        file="${{ steps.run.outputs.out-dir }}/crimescene.md"
+        [ -f "$file" ] && cat "$file" >> "$GITHUB_STEP_SUMMARY" || true
+
+    - name: Pull request comment
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        file="${{ steps.run.outputs.out-dir }}/crimescene.md"
+        [ -f "$file" ] || exit 0
+
+        marker="<!-- crimescene-report -->"
+        body="$(printf '%s\n\n%s' "$marker" "$(cat "$file")")"
+
+        # One sticky comment per PR: find ours by the marker and edit it, so a
+        # busy pull request does not collect a wall of bot noise.
+        existing="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+          --jq "[.[] | select(.body | startswith(\"${marker}\")) | .id] | first" 2>/dev/null || echo "null")"
+
+        if [ "$existing" != "null" ] && [ -n "$existing" ]; then
+          gh api -X PATCH "repos/${REPO}/issues/comments/${existing}" -f body="$body" --silent \
+            || echo "::warning title=crimescene::Could not update the pull request comment. Does the job have 'permissions: pull-requests: write'?"
+        else
+          gh api -X POST "repos/${REPO}/issues/${PR}/comments" -f body="$body" --silent \
+            || echo "::warning title=crimescene::Could not post the pull request comment. Does the job have 'permissions: pull-requests: write'?"
+        fi
+
+    - name: Upload report
+      if: ${{ always() && inputs.artifact == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.run.outputs.out-dir }}
+        if-no-files-found: ignore
+        retention-days: 14
+
+    # Last on purpose — everything above has already published its output.
+    - name: Enforce the hotspot gate
+      if: ${{ inputs.fail-above != '' }}
+      shell: bash
+      env:
+        SCORE: ${{ steps.run.outputs.top-hotspot-score }}
+        WORST: ${{ steps.run.outputs.top-hotspot-path }}
+        LIMIT: ${{ inputs.fail-above }}
+      run: |
+        set -euo pipefail
+        # awk, not bash: these are decimals and [ -gt ] only knows integers.
+        if awk "BEGIN { exit !(${SCORE:-0} > ${LIMIT}) }"; then
+          echo "::error title=crimescene::Worst hotspot ${SCORE} (${WORST}) is above the limit of ${LIMIT}"
+          exit 1
+        fi
+        echo "Worst hotspot ${SCORE} (${WORST}) is within the limit of ${LIMIT}."

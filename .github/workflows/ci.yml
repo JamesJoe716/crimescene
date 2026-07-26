@@ -34,24 +34,38 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # Runs the action on this repository — dogfooding and an end-to-end test of
+  # action.yml in one. If the action breaks, CI goes red here.
   dogfood:
     name: analyse this repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
+          # crimescene reads history; a shallow clone would truncate it.
           fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: node dist/cli.js . --json crimescene.json
-      - uses: actions/upload-artifact@v4
+
+      - name: Run crimescene
+        id: scene
+        uses: ./
         with:
-          name: crimescene-report
-          path: |
-            crimescene.html
-            crimescene.json
-          retention-days: 14
+          top: '12'
+          # A young repository has no coupling signal yet; keep the gate off
+          # until there is enough history for the score to mean anything.
+          fail-above: ''
+
+      - name: Check the action produced its outputs
+        run: |
+          set -euo pipefail
+          echo "worst: ${{ steps.scene.outputs.top-hotspot-path }} @ ${{ steps.scene.outputs.top-hotspot-score }}"
+          test -n "${{ steps.scene.outputs.top-hotspot-path }}"
+          test -n "${{ steps.scene.outputs.top-hotspot-score }}"
+          test -f "${{ steps.scene.outputs.report-html }}"

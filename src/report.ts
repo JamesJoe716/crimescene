@@ -1,3 +1,4 @@
+import { RAMP_DARK, RAMP_LIGHT, SHARED_SOURCE } from "./treemap.js";
 import type { XrayReport } from "./types.js";
 
 /**
@@ -8,12 +9,11 @@ import type { XrayReport } from "./types.js";
  * Colour follows a sequential encoding — one hue, monotone lightness — stepped
  * separately for each surface rather than flipped. On the dark surface the ramp
  * runs the other way so "near zero" always recedes toward the background.
+ *
+ * The layout maths is not duplicated here: `SHARED_SOURCE` is the literal
+ * source of the functions in `treemap.ts`, so the browser and the `--svg`
+ * renderer run the same code rather than two copies that drift.
  */
-
-/** Heat ramp for the light surface: near-zero → maximum. */
-const RAMP_LIGHT = ["#fadec9", "#f5c4a0", "#eea474", "#e57f45", "#d15f26", "#a9451a", "#7c3111"];
-/** Same hue, stepped for the dark surface. */
-const RAMP_DARK = ["#4e200e", "#7a3417", "#a4491f", "#c85f2a", "#e2793f", "#f09a63", "#f9b98e"];
 
 export function renderReport(report: XrayReport): string {
   // The payload sits in an `application/json` block read via textContent, so the
@@ -83,10 +83,9 @@ export function renderReport(report: XrayReport): string {
   </footer>
 </div>
 <script id="data" type="application/json">${payload}</script>
-<script>${SCRIPT.replace("__RAMP_LIGHT__", JSON.stringify(RAMP_LIGHT)).replace(
-    "__RAMP_DARK__",
-    JSON.stringify(RAMP_DARK),
-  )}</script>
+<script>${SCRIPT.replace("__RAMP_LIGHT__", JSON.stringify(RAMP_LIGHT))
+    .replace("__RAMP_DARK__", JSON.stringify(RAMP_DARK))
+    .replace("__SHARED__", () => SHARED_SOURCE)}</script>
 </body>
 </html>
 `;
@@ -115,8 +114,8 @@ const STYLE = `
   --critical:#d03b3b;
   --warning: #fab219;
   --good:    #0ca30c;
-  --on-heat-lo: #0b0b0b;
-  --on-heat-hi: #fcfcfb;
+  --ink-dark: #0b0b0b;
+  --ink-light: #fcfcfb;
   --shadow: 0 1px 2px rgba(11,11,11,.05), 0 8px 24px rgba(11,11,11,.06);
 }
 @media (prefers-color-scheme: dark) {
@@ -132,8 +131,8 @@ const STYLE = `
     --ring:    rgba(255,255,255,.10);
     --accent:  #3987e5;
     --critical:#d03b3b;
-    --on-heat-lo: #ffffff;
-    --on-heat-hi: #1a1a19;
+    --ink-dark: #1a1a19;
+    --ink-light: #ffffff;
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
   }
 }
@@ -149,8 +148,8 @@ const STYLE = `
   --ring:    rgba(255,255,255,.10);
   --accent:  #3987e5;
   --critical:#d03b3b;
-  --on-heat-lo: #ffffff;
-  --on-heat-hi: #1a1a19;
+  --ink-dark: #1a1a19;
+  --ink-light: #ffffff;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
 }
 
@@ -290,6 +289,11 @@ const SCRIPT = `
   var RAMP_DARK  = __RAMP_DARK__;
   var DATA = JSON.parse(document.getElementById("data").textContent);
 
+  /* The literal source of src/treemap.ts — buildTree, nodeHotspot, squarify,
+     heatColor, inkOn and clipLabel — so this page and the --svg renderer share
+     one implementation instead of two that drift. */
+__SHARED__
+
   /* ---------- helpers ---------- */
   var num = function (n) { return (n == null ? 0 : n).toLocaleString(); };
   var pct = function (n) { return Math.round(n * 100) + "%"; };
@@ -310,30 +314,11 @@ const SCRIPT = `
   };
   var ramp = function () { return isDark() ? RAMP_DARK : RAMP_LIGHT; };
 
-  /* Linear interpolation across the ramp; t is 0..1. */
-  var heat = function (t) {
-    var steps = ramp();
-    var x = Math.max(0, Math.min(1, t)) * (steps.length - 1);
-    var i = Math.floor(x), f = x - i;
-    if (i >= steps.length - 1) return steps[steps.length - 1];
-    return mix(steps[i], steps[i + 1], f);
-  };
-  var hex = function (color) {
-    return [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16)];
-  };
-  var mix = function (a, b, f) {
-    var x = hex(a), y = hex(b), out = "#";
-    for (var i = 0; i < 3; i++) {
-      var v = Math.round(x[i] + (y[i] - x[i]) * f).toString(16);
-      out += v.length < 2 ? "0" + v : v;
-    }
-    return out;
-  };
+  /* Sample the current theme's ramp; t is 0..1. */
+  var heat = function (t) { return heatColor(t, ramp()); };
   /* Pick the ink that survives on this fill. */
   var ink = function (color) {
-    var c = hex(color);
-    var lum = (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
-    return lum > 0.58 ? "var(--on-heat-hi)" : "var(--on-heat-lo)";
+    return inkOn(color) === "dark" ? "var(--ink-dark)" : "var(--ink-light)";
   };
 
   var maxHotspot = 0;
@@ -371,88 +356,8 @@ const SCRIPT = `
   });
 
   /* ---------- hierarchy ---------- */
-  function buildTree(files) {
-    var root = { name: DATA.repo, path: "", children: [], value: 0, weight: 0, files: 0 };
-    files.forEach(function (file) {
-      var parts = file.path.split("/");
-      var node = root;
-      for (var i = 0; i < parts.length - 1; i++) {
-        var name = parts[i];
-        var next = null;
-        for (var j = 0; j < node.children.length; j++) {
-          if (node.children[j].name === name && node.children[j].children) { next = node.children[j]; break; }
-        }
-        if (!next) {
-          next = { name: name, path: parts.slice(0, i + 1).join("/"), children: [], value: 0, weight: 0, files: 0 };
-          node.children.push(next);
-        }
-        node = next;
-      }
-      node.children.push({
-        name: parts[parts.length - 1], path: file.path,
-        value: Math.max(file.code, 1), weight: 0, file: file, files: 1
-      });
-    });
-    (function roll(node) {
-      if (!node.children) { node.weight = node.file.hotspot * node.value; return; }
-      node.value = 0; node.weight = 0; node.files = 0;
-      node.children.forEach(function (child) {
-        roll(child);
-        node.value += child.value; node.weight += child.weight; node.files += child.files;
-      });
-      node.children.sort(function (a, b) { return b.value - a.value; });
-    })(root);
-    return root;
-  }
-  /* Value-weighted mean hotspot, so a folder reads as hot only if its bulk is. */
-  var nodeHotspot = function (node) { return node.value > 0 ? node.weight / node.value : 0; };
-
-  var TREE = buildTree(DATA.files);
-
-  /* ---------- squarified treemap ---------- */
-  function worst(row, area, side) {
-    var lo = Infinity, hi = 0;
-    for (var i = 0; i < row.length; i++) {
-      if (row[i].area < lo) lo = row[i].area;
-      if (row[i].area > hi) hi = row[i].area;
-    }
-    var s2 = side * side, a2 = area * area;
-    return Math.max((s2 * hi) / a2, a2 / (s2 * lo));
-  }
-
-  function squarify(nodes, rect) {
-    var items = nodes.filter(function (n) { return n.value > 0; });
-    var total = 0;
-    items.forEach(function (n) { total += n.value; });
-    var out = [];
-    if (total <= 0 || rect.w <= 0 || rect.h <= 0) return out;
-
-    var factor = (rect.w * rect.h) / total;
-    var queue = items.map(function (n) { return { node: n, area: n.value * factor }; });
-    var x = rect.x, y = rect.y, w = rect.w, h = rect.h;
-
-    while (queue.length) {
-      var side = Math.min(w, h);
-      if (side <= 0) break;
-      var row = [], rowArea = 0;
-      while (queue.length) {
-        var candidate = rowArea + queue[0].area;
-        if (row.length === 0 || worst(row, rowArea, side) >= worst(row.concat([queue[0]]), candidate, side)) {
-          rowArea = candidate;
-          row.push(queue.shift());
-        } else break;
-      }
-      var thick = rowArea / side, offset = 0;
-      for (var i = 0; i < row.length; i++) {
-        var len = row[i].area / thick;
-        if (w >= h) out.push({ node: row[i].node, x: x, y: y + offset, w: thick, h: len });
-        else out.push({ node: row[i].node, x: x + offset, y: y, w: len, h: thick });
-        offset += len;
-      }
-      if (w >= h) { x += thick; w -= thick; } else { y += thick; h -= thick; }
-    }
-    return out;
-  }
+  /* buildTree, nodeHotspot and squarify come from the shared block above. */
+  var TREE = buildTree(DATA.files, DATA.repo);
 
   /* ---------- map rendering ---------- */
   var MAP_W = 1000, MAP_H = 580, GAP = 2, BAND = 15, MAX_DEPTH = 3;
@@ -549,7 +454,7 @@ const SCRIPT = `
       label.setAttribute("class", "dirname");
       label.setAttribute("x", rect.x + 6);
       label.setAttribute("y", rect.y + band - 4);
-      label.textContent = clip(node.name, rect.w - 12);
+      label.textContent = clipLabel(node.name, rect.w - 12);
       group.appendChild(label);
     }
     if (!isRoot) {
@@ -590,7 +495,7 @@ const SCRIPT = `
       text.setAttribute("x", rect.x + 5);
       text.setAttribute("y", rect.y + 13);
       text.setAttribute("fill", ink(fill));
-      text.textContent = clip(isFolder ? node.name + "/" : node.name, rect.w - 10);
+      text.textContent = clipLabel(isFolder ? node.name + "/" : node.name, rect.w - 10);
       group.appendChild(text);
     }
     group.addEventListener("mouseenter", function (e) { showTip(e, node); });
@@ -600,13 +505,6 @@ const SCRIPT = `
       group.addEventListener("click", function (e) { e.stopPropagation(); zoom(node.path); });
     }
     svg.appendChild(group);
-  }
-
-  /* ~6.1px per character at 11px in the system sans; close enough to avoid overflow. */
-  function clip(text, width) {
-    var max = Math.floor(width / 6.1);
-    if (max < 2) return "";
-    return text.length <= max ? text : text.slice(0, Math.max(1, max - 1)) + "…";
   }
 
   function zoom(path) {
