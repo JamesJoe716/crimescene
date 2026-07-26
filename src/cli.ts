@@ -194,7 +194,7 @@ main(process.argv.slice(2)).then(
     } else if (!(error instanceof GitError)) {
       process.stderr.write(
         `  If this looks like a bug, please report it:\n` +
-          `  https://github.com/OWNER/crimescene/issues\n\n`,
+          `  https://github.com/JamesJoe716/crimescene/issues\n\n`,
       );
     } else {
       process.stderr.write("\n");

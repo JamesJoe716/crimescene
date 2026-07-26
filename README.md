@@ -6,7 +6,7 @@
 
 One command. Zero dependencies. Zero network calls.
 
-[![CI](https://github.com/OWNER/crimescene/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/crimescene/actions/workflows/ci.yml)
+[![CI](https://github.com/JamesJoe716/crimescene/actions/workflows/ci.yml/badge.svg)](https://github.com/JamesJoe716/crimescene/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/crimescene.svg)](https://www.npmjs.com/package/crimescene)
 [![node](https://img.shields.io/node/v/crimescene.svg)](https://www.npmjs.com/package/crimescene)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

@@ -20,12 +20,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/crimescene.git"
+    "url": "git+https://github.com/JamesJoe716/crimescene.git"
   },
   "bugs": {
-    "url": "https://github.com/OWNER/crimescene/issues"
+    "url": "https://github.com/JamesJoe716/crimescene/issues"
   },
-  "homepage": "https://github.com/OWNER/crimescene#readme",
+  "homepage": "https://github.com/JamesJoe716/crimescene#readme",
   "type": "module",
   "bin": {
     "crimescene": "dist/cli.js"
